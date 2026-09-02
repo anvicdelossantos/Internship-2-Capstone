@@ -1,0 +1,128 @@
+{
+  "name": "Smart Logistics Risk Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "driver-telemetry",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "driver-telemetry"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/analyze_risk_score",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "id": "2",
+      "name": "Call FastAPI - Analyze Risk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/log_data",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({driver_id: $json.driver_id, risk_level: $json.risk_level, risk_score: $json.risk_score, source: \"n8n\"}) }}",
+        "options": {}
+      },
+      "id": "3",
+      "name": "Store Result in Database",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $('Call FastAPI - Analyze Risk').item.json.risk_score }}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4",
+      "name": "IF risk_score >= threshold",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "channel": "#logistics-alerts",
+        "text": "=🚨 HIGH RISK DRIVER DETECTED\\nDriver: {{ $('Call FastAPI - Analyze Risk').item.json.driver_id }}\\nRisk Score: {{ $('Call FastAPI - Analyze Risk').item.json.risk_score }}\\nLevel: {{ $('Call FastAPI - Analyze Risk').item.json.risk_level }}",
+        "otherOptions": {}
+      },
+      "id": "5",
+      "name": "Send Alert (Slack/Webhook)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1240, 220],
+      "notes": "Swap this node for Email, Telegram, or a generic Webhook node depending on what alert channel you actually have access to for the demo."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Call FastAPI - Analyze Risk').item.json }}"
+      },
+      "id": "6",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1240, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "Call FastAPI - Analyze Risk", "type": "main", "index": 0 }]]
+    },
+    "Call FastAPI - Analyze Risk": {
+      "main": [[{ "node": "Store Result in Database", "type": "main", "index": 0 }]]
+    },
+    "Store Result in Database": {
+      "main": [[{ "node": "IF risk_score >= threshold", "type": "main", "index": 0 }]]
+    },
+    "IF risk_score >= threshold": {
+      "main": [
+        [{ "node": "Send Alert (Slack/Webhook)", "type": "main", "index": 0 }],
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Alert (Slack/Webhook)": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "meta": {
+    "description": "Trigger: Webhook receives driver telemetry -> Action 1: send to FastAPI /analyze_risk_score -> Action 2: store result via /log_data -> Action 3: IF risk_score >= 70, send alert."
+  }
+}
